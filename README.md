@@ -468,6 +468,33 @@ These are session data, caches, and logs that regenerate automatically and would
 
 You never see the tokens — they exist only in the git repo.
 
+## Windows
+
+ai-sync runs natively on Windows (PowerShell, no WSL required). A few things work differently than on macOS/Linux:
+
+### `ai-sync link` uses hard links + junctions
+
+Symbolic links on Windows require admin rights or Developer Mode. To avoid that, `ai-sync link` uses:
+
+- **Hard links** for files (`fs.link`) — share storage with the repo file, so edits in either location propagate to the other.
+- **Directory junctions** for directories — Windows reparse points that don't need admin.
+
+Edit-propagation semantics are identical to symlinks. `ai-sync unlink` detects hard-linked files by inode and correctly restores them to standalone copies. Limitation: hard links must live on the same volume as the sync repo (typically the case — both under `C:\Users\you\`).
+
+### Path handling
+
+- Drive-letter paths (`C:\Users\you\...`) are recognized as local filesystem paths, not SSH URLs. You can pass a local path to `ai-sync bootstrap` if your sync repo is on a network share or another local directory.
+- `settings.json` path rewriting handles both `C:\Users\you` and `C:/Users/you` forms, including JSON-escaped `\\` sequences.
+- The `~/.claude` style paths in this README map to `%USERPROFILE%\.claude` (typically `C:\Users\you\.claude`). `~/.ai-sync` maps to `%USERPROFILE%\.ai-sync`. `~/.config/opencode/` maps to `%APPDATA%\opencode\` if `XDG_CONFIG_HOME` is unset.
+
+### Prerequisites
+
+- Node.js 22+ (install via `winget install OpenJS.NodeJS.LTS` or the official MSI).
+- Git for Windows.
+- `git config --global user.name` and `user.email` set — `ai-sync init` will fail on the first commit if these aren't configured.
+
+GitHub CLI (`gh`) is optional but recommended for the install-script flow.
+
 ## Safety
 
 - **Backup before pull/bootstrap:** Current config state is saved to a timestamped directory in `~/.ai-sync-backups/` before any destructive operation
