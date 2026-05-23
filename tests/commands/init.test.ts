@@ -202,9 +202,20 @@ describe("init CLI action (integration)", () => {
 	let logSpy: ReturnType<typeof vi.spyOn>;
 	let errorSpy: ReturnType<typeof vi.spyOn>;
 	let savedExitCode: number | undefined;
+	let originalHome: string | undefined;
+	let originalUserProfile: string | undefined;
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "init-cli-test-"));
+		// The init CLI exposes no --claude-dir flag, so it uses os.homedir()
+		// internally. Sandbox HOME (POSIX) and USERPROFILE (Windows) so the
+		// init writes into tmpDir instead of touching the developer's real
+		// ~/.claude — without this, install-skills was writing /sync into the
+		// real config dir on every test run.
+		originalHome = process.env.HOME;
+		originalUserProfile = process.env.USERPROFILE;
+		process.env.HOME = tmpDir;
+		process.env.USERPROFILE = tmpDir;
 		claudeDir = await createMockClaudeDir(tmpDir);
 		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -216,6 +227,10 @@ describe("init CLI action (integration)", () => {
 		logSpy.mockRestore();
 		errorSpy.mockRestore();
 		process.exitCode = savedExitCode;
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = originalUserProfile;
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 

@@ -352,9 +352,20 @@ describe("link/unlink CLI action (integration)", () => {
 	let logSpy: ReturnType<typeof vi.spyOn>;
 	let errorSpy: ReturnType<typeof vi.spyOn>;
 	let savedExitCode: number | undefined;
+	let originalHome: string | undefined;
+	let originalUserProfile: string | undefined;
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "link-cli-test-"));
+		// Sandbox HOME and USERPROFILE so the CLI's `getEnabledEnvironmentInstances()`
+		// resolves env config dirs INSIDE tmpDir instead of touching the developer's
+		// real ~/.claude. Without this, `link --repo <tmp>` creates junctions in the
+		// real home that become dangling once tmpDir is cleaned up. Setting both HOME
+		// (POSIX) and USERPROFILE (Windows) keeps the sandbox cross-platform.
+		originalHome = process.env.HOME;
+		originalUserProfile = process.env.USERPROFILE;
+		process.env.HOME = tmpDir;
+		process.env.USERPROFILE = tmpDir;
 		logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		savedExitCode = process.exitCode;
@@ -365,6 +376,10 @@ describe("link/unlink CLI action (integration)", () => {
 		logSpy.mockRestore();
 		errorSpy.mockRestore();
 		process.exitCode = savedExitCode;
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = originalUserProfile;
 		await fs.rm(tmpDir, { recursive: true, force: true });
 	});
 
