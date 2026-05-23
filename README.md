@@ -490,12 +490,14 @@ iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | i
 
 The installer detects/installs Node.js 22+ via `winget`, clones into `%USERPROFILE%\.ai-sync-cli`, builds, runs `npm link` so `ai-sync` is on your PATH, then walks through environment selection and (optionally) creates a GitHub repo via `gh`.
 
-To uninstall, run the same script with `-Uninstall`:
+To uninstall, set `AI_SYNC_UNINSTALL` and re-run the same one-liner:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 -OutFile $env:TEMP\ai-sync-install.ps1
-& $env:TEMP\ai-sync-install.ps1 -Uninstall
+$env:AI_SYNC_UNINSTALL = "1"; iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
+Remove-Item Env:\AI_SYNC_UNINSTALL
 ```
+
+The installer reads its flags from environment variables — `param()` blocks aren't allowed at the top of a script piped through `Invoke-Expression`, so the env-var pattern keeps the one-liner UX intact.
 
 A few things work differently than on macOS/Linux:
 

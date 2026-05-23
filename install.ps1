@@ -2,15 +2,13 @@
 # Usage: iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
 #
 # To uninstall:
-#   iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 -OutFile $env:TEMP\ai-sync-install.ps1
-#   & $env:TEMP\ai-sync-install.ps1 -Uninstall
+#   $env:AI_SYNC_UNINSTALL = "1"; iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
+#
+# This script must be `iex`-pipeable, which means it cannot use `param()` at
+# the top level (Invoke-Expression parses its input as an expression, not as a
+# script file). All knobs are read from environment variables.
 
-[CmdletBinding()]
-param(
-	[switch]$Uninstall,
-	[switch]$NonInteractive
-)
-
+$Uninstall = [bool]$env:AI_SYNC_UNINSTALL
 $ErrorActionPreference = "Stop"
 
 $Repo = "yelgabo/ai-sync"
@@ -27,12 +25,17 @@ function Write-Err   { param($Msg) Write-Host "Error: $Msg" -ForegroundColor Red
 # Read user input — returns the default when piped/non-interactive
 function Read-Prompt {
 	param([string]$Message, [string]$Default = "")
-	if ($NonInteractive -or -not [Environment]::UserInteractive) {
-		return $Default
-	}
+	# When PowerShell is launched with -NonInteractive or stdin is redirected
+	# (the common `iwr | iex` case), Read-Host throws. Treat that as "no
+	# input available" and fall back to the default. [Environment]::UserInteractive
+	# alone is unreliable here — it can return true while Read-Host still fails.
 	$display = $Message
 	if ($Default) { $display = $Message + " [" + $Default + "]" }
-	$reply = Read-Host $display
+	try {
+		$reply = Read-Host $display
+	} catch {
+		return $Default
+	}
 	if ([string]::IsNullOrWhiteSpace($reply)) { return $Default }
 	return $reply
 }
