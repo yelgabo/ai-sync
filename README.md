@@ -12,8 +12,16 @@ Keeps your skills, commands, hooks, settings, and tool config identical on every
 
 ### One-liner (recommended)
 
+**macOS / Linux / WSL:**
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
 ```
 
 The installer will:
@@ -22,14 +30,14 @@ The installer will:
 3. Ask for a GitHub repo name (default: `ai-config`) and visibility
 4. Create the repo via `gh`, run `ai-sync init`, and push your config
 
-Run it again to update an existing installation.
+Run it again to update an existing installation. See the [Windows](#windows) section for platform-specific details (hard-link fallback, prerequisites).
 
-Requires: git, [GitHub CLI](https://cli.github.com/) (`gh`) for automatic repo creation. Node.js 22+ is installed automatically if missing (via fnm, nvm, Homebrew, apt, yum, or direct binary download).
+Requires: git, [GitHub CLI](https://cli.github.com/) (`gh`) for automatic repo creation. Node.js 22+ is installed automatically if missing — via fnm/nvm/Homebrew/apt/yum/direct binary on POSIX, or via `winget` (OpenJS.NodeJS.LTS) on Windows.
 
 ### Manual
 
 ```bash
-git clone https://github.com/berlinguyinca/ai-sync.git
+git clone https://github.com/yelgabo/ai-sync.git
 cd ai-sync
 npm install
 npm run build
@@ -39,6 +47,8 @@ ai-sync init
 cd ~/.ai-sync && git remote add origin git@github.com:you/ai-config.git
 ai-sync push
 ```
+
+The manual steps work identically on Windows in PowerShell (use `https://` for the remote URL if you don't have an SSH key set up). `~/.ai-sync` maps to `%USERPROFILE%\.ai-sync`.
 
 ## Quick Start
 
@@ -118,7 +128,7 @@ If you previously used `claude-sync`, the installer automatically handles the re
 Just re-run the installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.sh | bash
 ```
 
 ### Migrating from v1 (flat) to v2 (multi-environment)
@@ -173,7 +183,7 @@ ai-sync pull
 If a machine was set up with an older ai-sync that doesn't understand v2, re-run the installer to update:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/berlinguyinca/ai-sync/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.sh | bash
 ```
 
 ## Commands
@@ -470,7 +480,24 @@ You never see the tokens — they exist only in the git repo.
 
 ## Windows
 
-ai-sync runs natively on Windows (PowerShell, no WSL required). A few things work differently than on macOS/Linux:
+ai-sync runs natively on Windows (PowerShell, no WSL required).
+
+### Install
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
+```
+
+The installer detects/installs Node.js 22+ via `winget`, clones into `%USERPROFILE%\.ai-sync-cli`, builds, runs `npm link` so `ai-sync` is on your PATH, then walks through environment selection and (optionally) creates a GitHub repo via `gh`.
+
+To uninstall, run the same script with `-Uninstall`:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 -OutFile $env:TEMP\ai-sync-install.ps1
+& $env:TEMP\ai-sync-install.ps1 -Uninstall
+```
+
+A few things work differently than on macOS/Linux:
 
 ### `ai-sync link` uses hard links + junctions
 
@@ -528,7 +555,7 @@ The sync repo is a standard git repository. You can inspect it, view history, an
 ## Development
 
 ```bash
-git clone https://github.com/berlinguyinca/ai-sync.git
+git clone https://github.com/yelgabo/ai-sync.git
 cd ai-sync
 npm install
 
