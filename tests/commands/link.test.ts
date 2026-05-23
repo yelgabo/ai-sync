@@ -85,7 +85,7 @@ describe("link command (integration)", () => {
 	});
 
 	describe("linkEnvironment", () => {
-		it("creates symlinks from config dir to sync repo", async () => {
+		it("creates links from config dir to sync repo", async () => {
 			const { syncRepoDir } = await setupV2SyncRepo(tmpDir);
 			const configDir = path.join(tmpDir, "home", ".claude");
 			const backupDir = path.join(tmpDir, ".ai-sync-backups", "pre-link-test");
@@ -103,13 +103,20 @@ describe("link command (integration)", () => {
 			expect(result.linked.length).toBeGreaterThan(0);
 			expect(result.linked).toContain("CLAUDE.md");
 
-			// Verify the CLAUDE.md in configDir is now a symlink
-			const stat = await fs.lstat(path.join(configDir, "CLAUDE.md"));
-			expect(stat.isSymbolicLink()).toBe(true);
-
-			// Verify the symlink target points to the repo
-			const linkTarget = await fs.readlink(path.join(configDir, "CLAUDE.md"));
-			expect(linkTarget).toContain(syncRepoDir);
+			// Verify the CLAUDE.md in configDir is now linked. POSIX gets a
+			// symlink; Windows (without admin) gets a hard link sharing an inode.
+			const configPath = path.join(configDir, "CLAUDE.md");
+			const repoPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
+			const stat = await fs.lstat(configPath);
+			if (process.platform === "win32" && !stat.isSymbolicLink()) {
+				const repoStat = await fs.stat(repoPath);
+				expect(stat.ino).toBe(repoStat.ino);
+				expect(stat.dev).toBe(repoStat.dev);
+			} else {
+				expect(stat.isSymbolicLink()).toBe(true);
+				const linkTarget = await fs.readlink(configPath);
+				expect(linkTarget).toContain(syncRepoDir);
+			}
 		});
 
 		it("backs up existing files before linking", async () => {
@@ -211,14 +218,23 @@ describe("link command (integration)", () => {
 			const second = await linkEnvironment(env, syncRepoDir, backupDir);
 			expect(second.linked).toContain("CLAUDE.md");
 
-			// The file should still be a symlink
-			const stat = await fs.lstat(path.join(configDir, "CLAUDE.md"));
-			expect(stat.isSymbolicLink()).toBe(true);
+			// The file should still be linked (symlink on POSIX, hard link
+			// matching the repo inode on Windows).
+			const configPath = path.join(configDir, "CLAUDE.md");
+			const repoPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
+			const stat = await fs.lstat(configPath);
+			if (process.platform === "win32" && !stat.isSymbolicLink()) {
+				const repoStat = await fs.stat(repoPath);
+				expect(stat.ino).toBe(repoStat.ino);
+				expect(stat.dev).toBe(repoStat.dev);
+			} else {
+				expect(stat.isSymbolicLink()).toBe(true);
+			}
 		});
 	});
 
 	describe("unlinkEnvironment", () => {
-		it("replaces symlinks with copies of repo content", async () => {
+		it("replaces links with copies of repo content", async () => {
 			const { syncRepoDir } = await setupV2SyncRepo(tmpDir);
 			const configDir = path.join(tmpDir, "home", ".claude");
 			const backupDir = path.join(tmpDir, ".ai-sync-backups", "pre-link-test");
@@ -230,20 +246,34 @@ describe("link command (integration)", () => {
 
 			// First link
 			await linkEnvironment(env, syncRepoDir, backupDir);
-			const statBefore = await fs.lstat(path.join(configDir, "CLAUDE.md"));
-			expect(statBefore.isSymbolicLink()).toBe(true);
+			const configPath = path.join(configDir, "CLAUDE.md");
+			const repoPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
+			const statBefore = await fs.lstat(configPath);
+			const repoStatBefore = await fs.stat(repoPath);
+			const isLinkedBefore =
+				statBefore.isSymbolicLink() ||
+				(process.platform === "win32" &&
+					statBefore.ino === repoStatBefore.ino &&
+					statBefore.dev === repoStatBefore.dev);
+			expect(isLinkedBefore).toBe(true);
 
 			// Then unlink
 			const result = await unlinkEnvironment(env, syncRepoDir);
 			expect(result.linked.length).toBeGreaterThan(0);
 
-			// Verify it's now a regular file
-			const statAfter = await fs.lstat(path.join(configDir, "CLAUDE.md"));
+			// Verify it's now a standalone regular file (no symlink, no shared inode)
+			const statAfter = await fs.lstat(configPath);
 			expect(statAfter.isSymbolicLink()).toBe(false);
 			expect(statAfter.isFile()).toBe(true);
+			if (process.platform === "win32") {
+				const repoStatAfter = await fs.stat(repoPath);
+				expect(statAfter.ino === repoStatAfter.ino && statAfter.dev === repoStatAfter.dev).toBe(
+					false,
+				);
+			}
 
 			// Content should be preserved
-			const content = await fs.readFile(path.join(configDir, "CLAUDE.md"), "utf-8");
+			const content = await fs.readFile(configPath, "utf-8");
 			expect(content).toBe("# My Config");
 		});
 

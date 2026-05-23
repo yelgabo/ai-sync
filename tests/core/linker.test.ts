@@ -92,7 +92,7 @@ describe("core/linker", () => {
 	});
 
 	describe("linkEnvironment", () => {
-		it("creates symlinks from config dir to repo", async () => {
+		it("creates links from config dir to repo", async () => {
 			const env = createTestEnv(configDir);
 
 			// Create a file in config dir
@@ -101,12 +101,21 @@ describe("core/linker", () => {
 			const result = await linkEnvironment(env, syncRepoDir, backupDir);
 
 			expect(result.linked).toContain("CLAUDE.md");
-			// Config path should be a symlink
-			const stat = fs.lstatSync(path.join(configDir, "CLAUDE.md"));
-			expect(stat.isSymbolicLink()).toBe(true);
-			// Symlink should point to repo
-			const target = fs.readlinkSync(path.join(configDir, "CLAUDE.md"));
-			expect(target).toBe(path.join(syncRepoDir, "testenv", "CLAUDE.md"));
+			// On POSIX the linker creates a symlink; on Windows (without admin)
+			// it creates a hard link, which shares an inode with the repo file
+			// but is not detectable via isSymbolicLink. Verify either way.
+			const configPath = path.join(configDir, "CLAUDE.md");
+			const repoPath = path.join(syncRepoDir, "testenv", "CLAUDE.md");
+			const stat = fs.lstatSync(configPath);
+			if (process.platform === "win32" && !stat.isSymbolicLink()) {
+				const repoStat = fs.statSync(repoPath);
+				expect(stat.ino).toBe(repoStat.ino);
+				expect(stat.dev).toBe(repoStat.dev);
+			} else {
+				expect(stat.isSymbolicLink()).toBe(true);
+				const target = fs.readlinkSync(configPath);
+				expect(target).toBe(repoPath);
+			}
 		});
 
 		it("seeds repo from config when repo target does not exist", async () => {
@@ -252,45 +261,64 @@ describe("core/linker", () => {
 			expect(stat.isSymbolicLink()).toBe(true);
 		});
 
-		it("replaces existing symlink without backup", async () => {
-			// Create shared/ in the repo
-			const repoSharedDir = path.join(syncRepoDir, "shared");
-			fs.mkdirSync(repoSharedDir, { recursive: true });
-			fs.writeFileSync(path.join(repoSharedDir, "standards.md"), "# Standards");
+		it.skipIf(process.platform === "win32")(
+			"replaces existing symlink without backup",
+			async () => {
+				// Create shared/ in the repo
+				const repoSharedDir = path.join(syncRepoDir, "shared");
+				fs.mkdirSync(repoSharedDir, { recursive: true });
+				fs.writeFileSync(path.join(repoSharedDir, "standards.md"), "# Standards");
 
-			// Create an old symlink pointing elsewhere
-			const otherDir = path.join(tmpDir, "other");
-			fs.mkdirSync(otherDir, { recursive: true });
-			fs.symlinkSync(otherDir, path.join(configDir, "shared"));
+				// Create an old symlink pointing elsewhere — requires symlink
+				// privileges that Windows withholds without admin/Developer Mode,
+				// so this fixture (and its assertions on `readlink`) is POSIX-only.
+				const otherDir = path.join(tmpDir, "other");
+				fs.mkdirSync(otherDir, { recursive: true });
+				fs.symlinkSync(otherDir, path.join(configDir, "shared"));
 
-			const result = await linkSharedDirectory(syncRepoDir, configDir, backupDir);
+				const result = await linkSharedDirectory(syncRepoDir, configDir, backupDir);
 
-			expect(result.linked).toBe(true);
-			expect(result.backedUp).toBe(false);
-			// Should now point to the repo shared dir
-			const target = fs.readlinkSync(path.join(configDir, "shared"));
-			expect(target).toBe(repoSharedDir);
-		});
+				expect(result.linked).toBe(true);
+				expect(result.backedUp).toBe(false);
+				// Should now point to the repo shared dir
+				const target = fs.readlinkSync(path.join(configDir, "shared"));
+				expect(target).toBe(repoSharedDir);
+			},
+		);
 	});
 
 	describe("unlinkEnvironment", () => {
-		it("replaces symlinks with copies", async () => {
+		it("replaces links with copies", async () => {
 			const env = createTestEnv(configDir);
 
 			fs.writeFileSync(path.join(configDir, "CLAUDE.md"), "# Config");
 			await linkEnvironment(env, syncRepoDir, backupDir);
 
-			// Verify it's a symlink
-			expect(fs.lstatSync(path.join(configDir, "CLAUDE.md")).isSymbolicLink()).toBe(true);
+			// Verify it's linked: symlink on POSIX, or hard link (matching inode)
+			// on Windows.
+			const configPath = path.join(configDir, "CLAUDE.md");
+			const repoPath = path.join(syncRepoDir, "testenv", "CLAUDE.md");
+			const linkedStat = fs.lstatSync(configPath);
+			const repoStat = fs.statSync(repoPath);
+			const linkedAsHardLink =
+				process.platform === "win32" &&
+				!linkedStat.isSymbolicLink() &&
+				linkedStat.ino === repoStat.ino &&
+				linkedStat.dev === repoStat.dev;
+			expect(linkedStat.isSymbolicLink() || linkedAsHardLink).toBe(true);
 
 			const result = await unlinkEnvironment(env, syncRepoDir);
 
 			expect(result.linked).toContain("CLAUDE.md");
-			// Should no longer be a symlink
-			const stat = fs.lstatSync(path.join(configDir, "CLAUDE.md"));
+			// Should no longer be a link — neither symlink nor inode-shared.
+			const stat = fs.lstatSync(configPath);
 			expect(stat.isSymbolicLink()).toBe(false);
+			if (process.platform === "win32") {
+				const repoStatAfter = fs.statSync(repoPath);
+				expect(stat.ino === repoStatAfter.ino && stat.dev === repoStatAfter.dev).toBe(false);
+			}
 			// Content should be preserved
-			const content = fs.readFileSync(path.join(configDir, "CLAUDE.md"), "utf-8");
+			const content = fs.readFileSync(configPath, "utf-8");
 			expect(content).toBe("# Config");
 		});
 

@@ -10,6 +10,7 @@ import {
 	splitMarkdownIntoFragments,
 } from "../../core/fragmenter.js";
 import { detectRepoVersion, migrateToV3 } from "../../core/migration.js";
+import { createLink, isLinkedTo } from "../../platform/links.js";
 import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
 
 export interface FragmentSplitOptions {
@@ -114,6 +115,7 @@ export async function handleFragmentSplit(options: FragmentSplitOptions): Promis
 		const claudeDir = options.claudeDir ?? getClaudeDir();
 		const syncRepoDir = getSyncRepoDir(options.repoPath);
 		const claudeMdPath = path.join(claudeDir, "CLAUDE.md");
+		const indexPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
 
 		// Read source file
 		let content: string;
@@ -125,17 +127,10 @@ export async function handleFragmentSplit(options: FragmentSplitOptions): Promis
 			return;
 		}
 
-		// Check whether it is already a symlink
-		try {
-			const stat = await fs.lstat(claudeMdPath);
-			if (stat.isSymbolicLink()) {
-				console.log(pc.yellow(`${claudeMdPath} is already a symlink — already migrated, skipping`));
-				return;
-			}
-		} catch {
-			// lstat failed — file doesn't exist
-			console.error(pc.red(`Could not stat ${claudeMdPath}`));
-			process.exitCode = 1;
+		// Skip if claudeMdPath is already linked to the index (symlink or, on
+		// Windows where symlinks need admin, a hard link).
+		if (await isLinkedTo(claudeMdPath, indexPath)) {
+			console.log(pc.yellow(`${claudeMdPath} is already linked — already migrated, skipping`));
 			return;
 		}
 
@@ -171,7 +166,6 @@ export async function handleFragmentSplit(options: FragmentSplitOptions): Promis
 		}
 
 		// Write index file
-		const indexPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
 		await fs.mkdir(path.dirname(indexPath), { recursive: true });
 		await fs.writeFile(indexPath, `${result.indexContent}\n`);
 		console.log(pc.dim(`  wrote claude/CLAUDE.md (index)`));
@@ -181,9 +175,9 @@ export async function handleFragmentSplit(options: FragmentSplitOptions): Promis
 		await createBackup(claudeDir, backupBaseDir, (rel) => rel === "CLAUDE.md");
 		console.log(pc.dim(`  backed up original CLAUDE.md`));
 
-		// Replace original with symlink
+		// Replace original with a link (symlink on POSIX, hard link on Windows)
 		await fs.rm(claudeMdPath);
-		await fs.symlink(indexPath, claudeMdPath);
+		await createLink(indexPath, claudeMdPath);
 
 		// Upgrade to v3 if needed
 		const version = await detectRepoVersion(syncRepoDir);

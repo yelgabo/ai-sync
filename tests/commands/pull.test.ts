@@ -140,7 +140,10 @@ describe("pull command (integration)", () => {
 		const result = await handlePull({ repoPath: syncRepoDir, claudeDir });
 
 		const settingsContent = await fs.readFile(path.join(claudeDir, "settings.json"), "utf-8");
-		expect(settingsContent).toContain(homeDir);
+		// settings.json is JSON, so backslashes in Windows paths are escaped as
+		// `\\`. Parse before comparing so the assertion works on both OSes.
+		const settings = JSON.parse(settingsContent) as { projectDir?: string };
+		expect(settings.projectDir).toContain(homeDir);
 		expect(settingsContent).not.toContain("{{HOME}}");
 		expect(result.filesApplied).toBeGreaterThan(0);
 	});

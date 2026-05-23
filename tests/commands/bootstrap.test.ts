@@ -82,9 +82,12 @@ describe("bootstrap command (integration)", () => {
 			claudeDir,
 		});
 
-		// settings.json should have {{HOME}} expanded to the new machine home
+		// settings.json should have {{HOME}} expanded to the new machine home.
+		// Parse JSON so escaped backslashes in Windows paths don't confuse the
+		// substring assertion.
 		const settingsContent = await fs.readFile(path.join(claudeDir, "settings.json"), "utf-8");
-		expect(settingsContent).toContain(newMachineHome);
+		const settings = JSON.parse(settingsContent) as Record<string, string>;
+		expect(Object.values(settings).join("|")).toContain(newMachineHome);
 		expect(settingsContent).not.toContain("{{HOME}}");
 
 		// Other files should be present

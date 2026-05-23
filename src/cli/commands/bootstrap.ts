@@ -22,11 +22,20 @@ import { getClaudeDir, getSyncRepoDir } from "../../platform/paths.js";
  * Returns null on success, or an error message string on failure.
  */
 function checkSshConnectivity(repoUrl: string): string | null {
-	// Only check for SSH-style URLs
-	const sshMatch = repoUrl.match(/^(?:ssh:\/\/)?(?:[^@]+@)?([^:/]+)/);
-	if (!sshMatch && !repoUrl.includes("git@")) return null;
+	// Skip local filesystem paths — Windows drive letters (C:\…) and POSIX
+	// absolute paths (/…) are not remote URLs. Local relative paths (./…, ../…)
+	// and Windows UNC paths (\\…) likewise have no host to check.
+	if (/^[a-zA-Z]:[\\/]/.test(repoUrl)) return null;
+	if (repoUrl.startsWith("/") || repoUrl.startsWith("./") || repoUrl.startsWith("../")) return null;
+	if (repoUrl.startsWith("\\\\") || repoUrl.startsWith("file:")) return null;
 
-	const host = sshMatch?.[1] ?? "github.com";
+	// SSH URLs always carry a user@ component (scp-like) or the ssh:// scheme.
+	// Plain "host:path" without "@" is ambiguous with local paths on Windows,
+	// so we require the user@ marker before treating it as SSH.
+	const sshMatch = repoUrl.match(/^(?:ssh:\/\/)?(?:[^@\s]+@)([^:/\s]+)/);
+	if (!sshMatch) return null;
+
+	const host = sshMatch[1];
 
 	// Validate hostname to prevent command injection — only allow DNS-safe characters
 	if (!/^[a-zA-Z0-9._-]+$/.test(host)) {

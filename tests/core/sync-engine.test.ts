@@ -384,9 +384,12 @@ describe("core/sync-engine", () => {
 
 			const result = await syncPull(pullOptions);
 
-			// settings.json should have expanded paths for new home
+			// settings.json should have expanded paths for new home. Parse so
+			// JSON-escaped backslashes in Windows paths don't confuse the
+			// substring assertion.
 			const settingsContent = await fs.readFile(path.join(newClaudeDir, "settings.json"), "utf-8");
-			expect(settingsContent).toContain(newHomeDir);
+			const settings = JSON.parse(settingsContent) as { projectDir?: string };
+			expect(settings.projectDir).toContain(newHomeDir);
 			expect(settingsContent).not.toContain("{{HOME}}");
 			expect(result.filesApplied).toBeGreaterThan(0);
 		});
@@ -1148,10 +1151,13 @@ describe("core/sync-engine", () => {
 
 			expect(pullResult.filesApplied).toBeGreaterThan(0);
 
-			// settings.json should have expanded paths for the new home
-			const settings = await fs.readFile(path.join(newClaudeDir, "settings.json"), "utf-8");
-			expect(settings).toContain(newHomeDir);
-			expect(settings).not.toContain("{{HOME}}");
+			// settings.json should have expanded paths for the new home. Parse
+			// so JSON-escaped backslashes in Windows paths don't confuse the
+			// substring assertion.
+			const settingsRaw = await fs.readFile(path.join(newClaudeDir, "settings.json"), "utf-8");
+			const settings = JSON.parse(settingsRaw) as { projectDir?: string };
+			expect(settings.projectDir).toContain(newHomeDir);
+			expect(settingsRaw).not.toContain("{{HOME}}");
 		});
 
 		it("creates backup of all environments before pull in v2", async () => {

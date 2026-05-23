@@ -96,7 +96,10 @@ describe("scanner", () => {
 		expect(result).toContain("keybindings.json");
 	});
 
-	it("follows symlinked files", async () => {
+	// Symlink-creation requires Developer Mode or admin on Windows, so these
+	// fixture builders fail with EPERM. The behavior under test (symlink
+	// traversal) is a POSIX-only path through the scanner.
+	it.skipIf(process.platform === "win32")("follows symlinked files", async () => {
 		await createFile("CLAUDE.md", "# Real file");
 		// Create a symlink to an allowed file
 		await fs.symlink(path.join(tmpDir, "CLAUDE.md"), path.join(tmpDir, "settings.json"));
@@ -107,7 +110,7 @@ describe("scanner", () => {
 		expect(result).toContain("settings.json");
 	});
 
-	it("follows symlinked directories", async () => {
+	it.skipIf(process.platform === "win32")("follows symlinked directories", async () => {
 		// Create an external directory with files
 		const externalDir = path.join(tmpDir, "_external");
 		await fs.mkdir(externalDir, { recursive: true });
@@ -121,7 +124,7 @@ describe("scanner", () => {
 		expect(result).toContain("commands/gw/skill.md");
 	});
 
-	it("prevents cycles from circular symlinks", async () => {
+	it.skipIf(process.platform === "win32")("prevents cycles from circular symlinks", async () => {
 		// Create a directory with a symlink back to parent
 		await createFile("commands/real.md", "# Real");
 		await fs.symlink(tmpDir, path.join(tmpDir, "commands", "loop"));

@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { createLink, isLinkedTo } from "../platform/links.js";
 import type { Environment } from "./environment.js";
 
 /**
@@ -91,20 +92,15 @@ export async function linkEnvironment(
 		const configPath = path.join(configDir, target);
 		const repoPath = path.join(repoSubdir, target);
 
-		// Check if already a symlink pointing to the right place
-		try {
-			const linkTarget = await fs.readlink(configPath.replace(/\/$/, ""));
-			if (linkTarget === repoPath.replace(/\/$/, "")) {
-				linked.push(target);
-				continue;
-			}
-		} catch {
-			// Not a symlink, proceed
-		}
-
 		const isDir = target.endsWith("/");
 		const configTarget = isDir ? configPath.replace(/\/$/, "") : configPath;
 		const repoTarget = isDir ? repoPath.replace(/\/$/, "") : repoPath;
+
+		// Check if already linked (symlink, junction, or — on Windows — hard link)
+		if (await isLinkedTo(configTarget, repoTarget)) {
+			linked.push(target);
+			continue;
+		}
 
 		// Check if source exists in config dir
 		let configExists = false;
@@ -149,9 +145,9 @@ export async function linkEnvironment(
 			}
 		}
 
-		// Create symlink
+		// Create link (symlink on POSIX, junction for dirs / hard link for files on Windows)
 		await fs.mkdir(path.dirname(configTarget), { recursive: true });
-		await fs.symlink(repoTarget, configTarget);
+		await createLink(repoTarget, configTarget);
 		linked.push(target);
 	}
 
@@ -179,16 +175,13 @@ export async function unlinkEnvironment(
 			? path.join(repoSubdir, target).replace(/\/$/, "")
 			: path.join(repoSubdir, target);
 
-		// Check if it's a symlink
-		try {
-			const stat = await fs.lstat(configTarget);
-			if (!stat.isSymbolicLink()) continue;
-		} catch {
-			continue;
-		}
+		// Check if it's linked to the repo (symlink/junction, or hard link on Windows).
+		// On Windows hard-link files this matches by inode, so unlink also restores
+		// them to standalone copies.
+		if (!(await isLinkedTo(configTarget, repoTarget))) continue;
 
-		// Remove symlink
-		await fs.rm(configTarget);
+		// Remove the link (works for symlinks, junctions, and hard links)
+		await fs.rm(configTarget, { recursive: true, force: true });
 
 		// Copy content back from repo
 		try {
@@ -248,9 +241,10 @@ export async function linkSharedDirectory(
 		}
 	}
 
-	// 3. Create symlink: configDir/shared -> syncRepoDir/shared
+	// 3. Create link: configDir/shared -> syncRepoDir/shared
+	// (junction on Windows; works without admin since `shared` is always a directory)
 	await fs.mkdir(configDir, { recursive: true });
-	await fs.symlink(repoSharedDir, configSharedPath);
+	await createLink(repoSharedDir, configSharedPath);
 
 	return { linked: true, backedUp };
 }

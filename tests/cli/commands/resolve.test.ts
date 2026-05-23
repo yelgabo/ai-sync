@@ -17,6 +17,7 @@ let claudeDir: string;
 let logSpy: ReturnType<typeof vi.spyOn>;
 let errSpy: ReturnType<typeof vi.spyOn>;
 let originalHome: string | undefined;
+let originalUserProfile: string | undefined;
 
 beforeEach(async () => {
 	baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-sync-resolve-test-"));
@@ -26,7 +27,11 @@ beforeEach(async () => {
 	await fs.mkdir(syncRepoDir, { recursive: true });
 	await fs.mkdir(claudeDir, { recursive: true });
 	originalHome = process.env.HOME;
+	originalUserProfile = process.env.USERPROFILE;
 	process.env.HOME = homeDir;
+	// On Windows, `os.homedir()` reads USERPROFILE; setting HOME alone would
+	// leak writes to the developer's real ~/.claude directory.
+	process.env.USERPROFILE = homeDir;
 	logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 	errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 	process.exitCode = 0;
@@ -37,6 +42,8 @@ afterEach(async () => {
 	errSpy.mockRestore();
 	if (originalHome === undefined) delete process.env.HOME;
 	else process.env.HOME = originalHome;
+	if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+	else process.env.USERPROFILE = originalUserProfile;
 	await fs.rm(baseDir, { recursive: true, force: true });
 	process.exitCode = 0;
 });

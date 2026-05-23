@@ -126,28 +126,46 @@ describe("handleFragmentSplit", () => {
 		expect(indexContent).toContain("Preamble content here");
 	});
 
-	it("replaces CLAUDE.md with a symlink pointing at the sync repo index", async () => {
+	it("replaces CLAUDE.md with a link pointing at the sync repo index", async () => {
 		const { syncRepoDir } = await setupV2SyncRepo(tmpDir);
 		const claudeDir = await createClaudeDir(tmpDir, SAMPLE_CLAUDE_MD);
 		const claudeMdPath = path.join(claudeDir, "CLAUDE.md");
+		const indexPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
 
 		await handleFragmentSplit({ repoPath: syncRepoDir, claudeDir });
 
+		// On POSIX the linker creates a symlink; on Windows (where symlinks
+		// require admin/Developer Mode) a hard link is used instead. Both
+		// share storage with the index, so we verify by comparing inodes
+		// rather than readlink — readlink does not work on hard links.
 		const stat = await fs.lstat(claudeMdPath);
-		expect(stat.isSymbolicLink()).toBe(true);
-
-		const target = await fs.readlink(claudeMdPath);
-		expect(target).toBe(path.join(syncRepoDir, "claude", "CLAUDE.md"));
+		const indexStat = await fs.stat(indexPath);
+		if (process.platform === "win32" && !stat.isSymbolicLink()) {
+			expect(stat.ino).toBe(indexStat.ino);
+			expect(stat.dev).toBe(indexStat.dev);
+		} else {
+			expect(stat.isSymbolicLink()).toBe(true);
+			const target = await fs.readlink(claudeMdPath);
+			expect(target).toBe(indexPath);
+		}
 	});
 
-	it("is idempotent — skips when CLAUDE.md is already a symlink", async () => {
+	it("is idempotent — skips when CLAUDE.md is already linked", async () => {
 		const { syncRepoDir } = await setupV2SyncRepo(tmpDir);
 		const claudeDir = await createClaudeDir(tmpDir, SAMPLE_CLAUDE_MD);
 		const claudeMdPath = path.join(claudeDir, "CLAUDE.md");
+		const indexPath = path.join(syncRepoDir, "claude", "CLAUDE.md");
 
 		// First run
 		await handleFragmentSplit({ repoPath: syncRepoDir, claudeDir });
-		expect((await fs.lstat(claudeMdPath)).isSymbolicLink()).toBe(true);
+		const firstStat = await fs.lstat(claudeMdPath);
+		const indexStat = await fs.stat(indexPath);
+		const isLinked =
+			firstStat.isSymbolicLink() ||
+			(process.platform === "win32" &&
+				firstStat.ino === indexStat.ino &&
+				firstStat.dev === indexStat.dev);
+		expect(isLinked).toBe(true);
 
 		// Second run should be a no-op
 		const callsBefore = logSpy.mock.calls.length;
