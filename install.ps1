@@ -1,4 +1,4 @@
-﻿# ai-sync Windows installer
+# ai-sync Windows installer
 # Usage: iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
 #
 # To uninstall:
@@ -22,13 +22,13 @@ function Write-Ok    { param($Msg) Write-Host $Msg -ForegroundColor Green }
 function Write-Warn  { param($Msg) Write-Host $Msg -ForegroundColor Yellow }
 function Write-Err   { param($Msg) Write-Host "Error: $Msg" -ForegroundColor Red; exit 1 }
 
-# Read user input — returns the default when piped/non-interactive
+# Read user input - returns the default when piped/non-interactive
 function Read-Prompt {
 	param([string]$Message, [string]$Default = "")
 	# When PowerShell is launched with -NonInteractive or stdin is redirected
 	# (the common `iwr | iex` case), Read-Host throws. Treat that as "no
 	# input available" and fall back to the default. [Environment]::UserInteractive
-	# alone is unreliable here — it can return true while Read-Host still fails.
+	# alone is unreliable here - it can return true while Read-Host still fails.
 	$display = $Message
 	if ($Default) { $display = $Message + " [" + $Default + "]" }
 	try {
@@ -47,7 +47,7 @@ function Refresh-Path {
 	$env:PATH = "$machine;$user"
 }
 
-# ── uninstall ─────────────────────────────────────────────────────
+# -- uninstall -----------------------------------------------------
 
 if ($Uninstall) {
 	Write-Info "Uninstalling ai-sync..."
@@ -79,7 +79,7 @@ if ($Uninstall) {
 	exit 0
 }
 
-# ── preflight ──────────────────────────────────────────────────────
+# -- preflight ------------------------------------------------------
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 	Write-Err "git is required but not installed. Install it from https://git-scm.com/download/win or with: winget install -e --id Git.Git"
@@ -129,7 +129,7 @@ if ($nodeMajor -lt $NodeMajor) {
 }
 Write-Ok "Node.js $nodeVer found"
 
-# ── install ────────────────────────────────────────────────────────
+# -- install --------------------------------------------------------
 
 if (Test-Path (Join-Path $InstallDir ".git")) {
 	Write-Info "Updating existing installation in $InstallDir..."
@@ -151,7 +151,7 @@ try {
 	& npm run build --silent
 	if ($LASTEXITCODE -ne 0) { Write-Err "npm run build failed" }
 
-	# ── link ───────────────────────────────────────────────────────────
+	# -- link -----------------------------------------------------------
 
 	Write-Info "Linking ai-sync globally..."
 	& npm link --silent
@@ -159,7 +159,7 @@ try {
 		$cliPath = Join-Path $InstallDir "dist\cli.js"
 		Write-Warn ("npm link failed - run ai-sync directly via: node '" + $cliPath + "' COMMAND")
 	} else {
-		# npm link puts shims in %APPDATA%\npm — verify it's on PATH
+		# npm link puts shims in %APPDATA%\npm - verify it's on PATH
 		$npmGlobalBin = & npm prefix -g 2>$null
 		if ($npmGlobalBin -and -not ($env:PATH -split ';' | Where-Object { $_ -eq $npmGlobalBin })) {
 			Write-Warn "npm global bin ($npmGlobalBin) is not on PATH. Add it and restart your shell:"
@@ -173,10 +173,10 @@ try {
 Write-Host ""
 Write-Ok "ai-sync installed successfully!"
 
-# Use the built CLI directly — the npm shim may not be visible until shell restart
+# Use the built CLI directly - the npm shim may not be visible until shell restart
 $AiSync = { param($Args) & node (Join-Path $InstallDir "dist\cli.js") @Args }
 
-# ── environment selection ──────────────────────────────────────────
+# -- environment selection ------------------------------------------
 
 Write-Info "Which environments do you want to sync?"
 Write-Host "  1) Claude Code only (default)"
@@ -202,7 +202,7 @@ try {
 	Write-Warn "Skill installation skipped (run 'ai-sync install-skills' later)"
 }
 
-# ── setup sync repo ───────────────────────────────────────────────
+# -- setup sync repo -----------------------------------------------
 
 if (Test-Path (Join-Path $SyncDir ".git")) {
 	Write-Host ""
@@ -229,7 +229,7 @@ Write-Host ""
 # gh CLI is optional
 $hasGh = [bool](Get-Command gh -ErrorAction SilentlyContinue)
 if (-not $hasGh) {
-	Write-Warn "GitHub CLI (gh) not found — skipping automatic repo creation."
+	Write-Warn "GitHub CLI (gh) not found - skipping automatic repo creation."
 	Write-Host ""
 	Write-Host "Create a repo on GitHub manually, then run:"
 	Write-Host "  ai-sync init"
@@ -244,7 +244,7 @@ try {
 	$ghAuthOk = ($LASTEXITCODE -eq 0)
 } catch {}
 if (-not $ghAuthOk) {
-	Write-Warn "GitHub CLI not authenticated — skipping automatic repo creation."
+	Write-Warn "GitHub CLI not authenticated - skipping automatic repo creation."
 	Write-Host "Run 'gh auth login' first, then:"
 	Write-Host "  ai-sync init"
 	Write-Host "  cd $SyncDir; git remote add origin [repo-url]"
@@ -259,7 +259,7 @@ try {
 	if ($rawUser) { $ghUser = ([string]$rawUser).Trim() }
 } catch {}
 if (-not $ghUser) {
-	Write-Warn "Could not determine GitHub username — skipping automatic repo creation."
+	Write-Warn "Could not determine GitHub username - skipping automatic repo creation."
 	Write-Host "  ai-sync init"
 	Write-Host "  cd $SyncDir; git remote add origin [repo-url]"
 	Write-Host "  ai-sync push"
@@ -277,7 +277,7 @@ if ($repoVisibility -notin @("private", "public")) {
 	$repoVisibility = "private"
 }
 
-# HTTPS for cross-platform — SSH works too, but HTTPS works without an ssh-agent
+# HTTPS for cross-platform - SSH works too, but HTTPS works without an ssh-agent
 $remoteUrl = "https://github.com/$ghUser/$repoName.git"
 
 Write-Host ""
