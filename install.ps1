@@ -4,23 +4,33 @@
 # To uninstall:
 #   $env:AI_SYNC_UNINSTALL = "1"; iwr -useb https://raw.githubusercontent.com/yelgabo/ai-sync/main/install.ps1 | iex
 #
-# This script must be `iex`-pipeable, which means it cannot use `param()` at
-# the top level (Invoke-Expression parses its input as an expression, not as a
-# script file). All knobs are read from environment variables.
+# This script must be `iex`-pipeable. Two constraints follow:
+#   1. No `param()` at top level — Invoke-Expression parses its input as an
+#      expression, not as a script file. Knobs come from env vars instead.
+#   2. The entire body lives inside a function. When piped through `iex` the
+#      script runs IN the caller's shell, so any top-level `exit` would close
+#      the user's PowerShell window. Inside a function, `exit` only returns
+#      from the function and the shell survives.
 
-$Uninstall = [bool]$env:AI_SYNC_UNINSTALL
-$ErrorActionPreference = "Stop"
+function Invoke-AiSyncInstaller {
+	$Uninstall = [bool]$env:AI_SYNC_UNINSTALL
+	# Scope ErrorActionPreference to this function so we don't leave the user's
+	# shell with Stop after the script ends.
+	$local:ErrorActionPreference = "Stop"
 
-$Repo = "yelgabo/ai-sync"
-$InstallDir = if ($env:AI_SYNC_INSTALL_DIR) { $env:AI_SYNC_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".ai-sync-cli" }
-$SyncDir = Join-Path $env:USERPROFILE ".ai-sync"
-$DefaultRepoName = "ai-config"
-$NodeMajor = 22
+	$Repo = "yelgabo/ai-sync"
+	$InstallDir = if ($env:AI_SYNC_INSTALL_DIR) { $env:AI_SYNC_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".ai-sync-cli" }
+	$SyncDir = Join-Path $env:USERPROFILE ".ai-sync"
+	$DefaultRepoName = "ai-config"
+	$NodeMajor = 22
 
-function Write-Info  { param($Msg) Write-Host $Msg -ForegroundColor Blue }
-function Write-Ok    { param($Msg) Write-Host $Msg -ForegroundColor Green }
-function Write-Warn  { param($Msg) Write-Host $Msg -ForegroundColor Yellow }
-function Write-Err   { param($Msg) Write-Host "Error: $Msg" -ForegroundColor Red; exit 1 }
+	function Write-Info  { param($Msg) Write-Host $Msg -ForegroundColor Blue }
+	function Write-Ok    { param($Msg) Write-Host $Msg -ForegroundColor Green }
+	function Write-Warn  { param($Msg) Write-Host $Msg -ForegroundColor Yellow }
+	# Throws an exception caught by the outer invocation. We cannot use `exit`
+	# inside a function when piped via `iex` because `exit` terminates the
+	# whole PowerShell host, not just the function.
+	function Write-Err   { param($Msg) throw "ai-sync-installer-error: $Msg" }
 
 # Read user input - returns the default when piped/non-interactive
 function Read-Prompt {
@@ -76,7 +86,7 @@ if ($Uninstall) {
 	Write-Host ""
 	Write-Host "To remove them too:"
 	Write-Host "  Remove-Item -Recurse -Force `"$SyncDir`", `"$env:USERPROFILE\.ai-sync-backups`""
-	exit 0
+	return
 }
 
 # -- preflight ------------------------------------------------------
@@ -210,7 +220,7 @@ if (Test-Path (Join-Path $SyncDir ".git")) {
 	Write-Host "  ai-sync push    # push local changes"
 	Write-Host "  ai-sync pull    # pull remote changes"
 	Write-Host "  ai-sync status  # check sync state"
-	exit 0
+	return
 }
 
 $claudeDir = Join-Path $env:USERPROFILE ".claude"
@@ -219,23 +229,33 @@ if (-not (Test-Path $claudeDir)) {
 	Write-Warn "No $claudeDir directory found. Run Claude Code first to generate config,"
 	Write-Host "then run: ai-sync init"
 	Write-Host ""
-	exit 0
+	return
 }
 
 Write-Host ""
 Write-Info "Let's set up your sync repo."
 Write-Host ""
 
-# gh CLI is optional
+# gh CLI is optional, but if missing we try to winget-install it the same way
+# we install Node — consistent UX. Set $env:AI_SYNC_SKIP_GH=1 to skip this.
 $hasGh = [bool](Get-Command gh -ErrorAction SilentlyContinue)
+if (-not $hasGh -and -not $env:AI_SYNC_SKIP_GH -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+	Write-Info "GitHub CLI (gh) not found - installing via winget..."
+	& winget install -e --id GitHub.cli --accept-package-agreements --accept-source-agreements --silent
+	if ($LASTEXITCODE -eq 0) {
+		Refresh-Path
+		$hasGh = [bool](Get-Command gh -ErrorAction SilentlyContinue)
+		if ($hasGh) { Write-Ok "GitHub CLI installed" }
+	}
+}
 if (-not $hasGh) {
-	Write-Warn "GitHub CLI (gh) not found - skipping automatic repo creation."
+	Write-Warn "GitHub CLI (gh) not available - skipping automatic repo creation."
 	Write-Host ""
-	Write-Host "Create a repo on GitHub manually, then run:"
+	Write-Host "Install gh manually (winget install -e --id GitHub.cli), then run:"
 	Write-Host "  ai-sync init"
 	Write-Host "  cd $SyncDir; git remote add origin [repo-url]"
 	Write-Host "  ai-sync push"
-	exit 0
+	return
 }
 
 $ghAuthOk = $false
@@ -243,13 +263,23 @@ try {
 	& gh auth status 2>$null | Out-Null
 	$ghAuthOk = ($LASTEXITCODE -eq 0)
 } catch {}
+if (-not $ghAuthOk -and -not $env:AI_SYNC_SKIP_GH) {
+	Write-Info "GitHub CLI is not authenticated - launching 'gh auth login'..."
+	Write-Host "  (this is interactive: gh will guide you through browser login)"
+	# Hand the terminal to gh; it manages its own stdio.
+	& gh auth login
+	try {
+		& gh auth status 2>$null | Out-Null
+		$ghAuthOk = ($LASTEXITCODE -eq 0)
+	} catch {}
+}
 if (-not $ghAuthOk) {
 	Write-Warn "GitHub CLI not authenticated - skipping automatic repo creation."
-	Write-Host "Run 'gh auth login' first, then:"
+	Write-Host "Authenticate later with 'gh auth login', then:"
 	Write-Host "  ai-sync init"
 	Write-Host "  cd $SyncDir; git remote add origin [repo-url]"
 	Write-Host "  ai-sync push"
-	exit 0
+	return
 }
 
 $ghUser = ""
@@ -263,7 +293,7 @@ if (-not $ghUser) {
 	Write-Host "  ai-sync init"
 	Write-Host "  cd $SyncDir; git remote add origin [repo-url]"
 	Write-Host "  ai-sync push"
-	exit 0
+	return
 }
 
 $repoName = Read-Prompt "Repository name" $DefaultRepoName
@@ -317,3 +347,18 @@ $installUrl = "https://raw.githubusercontent.com/$Repo/main/install.ps1"
 Write-Host "On other Windows machines, run:"
 Write-Host ("  iwr -useb " + $installUrl + " | iex")
 Write-Host ""
+}
+
+# Invoke the wrapped installer. `Write-Err` throws a sentinel exception that
+# we catch here so a fatal error prints cleanly without dragging the user's
+# shell down with it.
+try {
+	Invoke-AiSyncInstaller
+} catch {
+	$msg = $_.Exception.Message
+	if ($msg -like "ai-sync-installer-error: *") {
+		Write-Host ("Error: " + $msg.Substring("ai-sync-installer-error: ".Length)) -ForegroundColor Red
+	} else {
+		Write-Host ("Installer aborted: " + $msg) -ForegroundColor Red
+	}
+}
