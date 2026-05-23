@@ -311,20 +311,27 @@ if ($repoVisibility -notin @("private", "public")) {
 $remoteUrl = "https://github.com/$ghUser/$repoName.git"
 
 Write-Host ""
-Write-Info "Creating $repoVisibility repo: $ghUser/$repoName"
 
-$ghOutput = ""
-$repoExisted = $false
-$visibilityFlag = "--" + $repoVisibility
-$ghDescription = "AI tool config synced by ai-sync"
-$ghOutput = & gh repo create $repoName $visibilityFlag --description $ghDescription 2>$null | Out-String
-if ($LASTEXITCODE -eq 0) {
-	Write-Ok "GitHub repo created"
-} elseif ($ghOutput -match "already exists") {
-	$repoExisted = $true
+# Detect whether the repo already exists. Using `gh repo view` instead of
+# parsing the "already exists" string out of `gh repo create`'s stderr —
+# the previous approach silently failed because stderr was suppressed by
+# `2>$null` and the match never fired, sending the installer down the
+# Write-Err path even when the repo just happened to exist.
+& gh repo view "$ghUser/$repoName" 2>&1 | Out-Null
+$repoExisted = ($LASTEXITCODE -eq 0)
+
+if ($repoExisted) {
 	Write-Ok "Repository $ghUser/$repoName already exists - will bootstrap from it"
 } else {
-	Write-Err ("Failed to create repo: " + $ghOutput)
+	Write-Info "Creating $repoVisibility repo: $ghUser/$repoName"
+	$visibilityFlag = "--" + $repoVisibility
+	$ghDescription = "AI tool config synced by ai-sync"
+	# Merge stderr to stdout so any error text reaches the failure message.
+	$ghOutput = (& gh repo create $repoName $visibilityFlag --description $ghDescription 2>&1) | Out-String
+	if ($LASTEXITCODE -ne 0) {
+		Write-Err ("Failed to create repo: " + $ghOutput.Trim())
+	}
+	Write-Ok "GitHub repo created"
 }
 
 if ($repoExisted) {
@@ -335,9 +342,17 @@ if ($repoExisted) {
 	& $AiSync @("init")
 
 	Write-Info "Adding remote and pushing..."
-	try { & git -C $SyncDir remote add origin $remoteUrl 2>$null } catch {}
+	# `git remote add` exits non-zero if a remote named 'origin' already exists
+	# (left over from a partial previous run); fall back to set-url in that case.
+	& git -C $SyncDir remote add origin $remoteUrl 2>&1 | Out-Null
 	if ($LASTEXITCODE -ne 0) { & git -C $SyncDir remote set-url origin $remoteUrl }
-	& $AiSync @("push")
+	# Initial push must `--set-upstream`; `ai-sync push` short-circuits to
+	# "no changes to push" when the local tree matches HEAD, leaving the
+	# remote branch missing. Do the upstream push directly here.
+	& git -C $SyncDir push -u origin main 2>&1 | ForEach-Object { Write-Host $_ }
+	if ($LASTEXITCODE -ne 0) {
+		Write-Err "git push failed - check your authentication and try `git -C $SyncDir push -u origin main` manually."
+	}
 }
 
 Write-Host ""
